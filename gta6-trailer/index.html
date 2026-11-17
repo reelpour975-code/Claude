@@ -1,0 +1,258 @@
+<title>Néon Côte Trailer</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Anton&family=Inter:wght@400;600&display=swap">
+<style>
+/* Layout: one dark cinema screen, 16:9 canvas centred, transport bar beneath */
+:root{
+  --bg:#0b0710; --fg:#f4ecf7; --muted:#a693b3; --pink:#ff3d8b; --cyan:#3de0ff; --line:#2a1d33;
+  --display:"Anton","Impact","Arial Narrow",sans-serif;
+  --body:"Inter",system-ui,sans-serif;
+  color-scheme:dark;
+}
+html,body{background:var(--bg);color:var(--fg);font-family:var(--body)}
+.wrap{max-width:1100px;margin:0 auto;padding-block:24px 40px;
+  padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));
+  display:flex;flex-direction:column;gap:14px}
+.eyebrow{font-size:12px;letter-spacing:.18em;text-transform:uppercase;color:var(--muted)}
+.screen{position:relative;width:100%;aspect-ratio:16/9;max-width:100%;background:#000;border-radius:6px;overflow:hidden;
+  box-shadow:0 0 0 1px var(--line),0 30px 80px -30px rgba(255,61,139,.35)}
+canvas{display:block;width:100%;height:100%}
+.bar{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+button{font:600 14px var(--body);color:var(--fg);background:transparent;border:1px solid var(--line);border-radius:999px;
+  padding:8px 16px;cursor:pointer}
+button:hover{border-color:var(--pink)}
+button:focus-visible{outline:2px solid var(--cyan);outline-offset:2px}
+.track{flex:1;min-width:140px;height:6px;background:var(--line);border-radius:3px;position:relative;cursor:pointer}
+.fill{position:absolute;inset:0 auto 0 0;width:0;background:linear-gradient(90deg,var(--pink),var(--cyan));border-radius:3px}
+.time{font-variant-numeric:tabular-nums;color:var(--muted);font-size:13px}
+.note{color:var(--muted);font-size:13px;max-width:65ch;line-height:1.5}
+</style>
+
+<div class="wrap">
+  <div class="eyebrow">Trailer fan · 100 % code · 30 s</div>
+  <div class="screen"><canvas id="c" width="1280" height="720"></canvas></div>
+  <div class="bar">
+    <button id="play" type="button">Pause</button>
+    <button id="restart" type="button">Rejouer</button>
+    <div class="track" id="track"><div class="fill" id="fill"></div></div>
+    <span class="time" id="time">0:00 / 0:30</span>
+  </div>
+  <p class="note">Création de fan non officielle, dessinée entièrement en JavaScript sur un canvas : aucune image, aucun logo ni personnage officiel. Hommage à l'attente de GTA 6.</p>
+</div>
+
+<script>
+const W=1280,H=720,DUR=30;
+const cv=document.getElementById('c'),x=cv.getContext('2d');
+
+// deterministic random
+function rng(seed){return()=>{seed=(seed*1664525+1013904223)>>>0;return seed/4294967296}}
+const R=rng(7);
+const stars=[...Array(140)].map(()=>[R()*W,R()*H*.55,R()*1.6+.3,R()*6]);
+const buildings=[];{let px=-20;while(px<W+40){const w=40+R()*70,h=120+R()*320;buildings.push({x:px,w,h,seed:R()*1000,tower:R()<.15});px+=w+2+R()*6}}
+const rain=[...Array(260)].map(()=>[R()*W,R()*H,8+R()*14,R()]);
+const palms=[[150,1.15,-.08],[300,.85,.1],[1060,1.25,.06],[1180,.9,-.12]];
+
+const ease=t=>t<0?0:t>1?1:t*t*(3-2*t);
+const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
+function fade(t,a,b,f=.6){return clamp(Math.min((t-a)/f,(b-t)/f),0,1)}
+
+function text(str,y,size,alpha,opts={}){
+  x.save();x.globalAlpha=alpha;x.textAlign='center';
+  x.font=`${opts.weight||''} ${size}px ${opts.font||'Anton, Impact, sans-serif'}`;
+  if(opts.track){x.letterSpacing=opts.track+'px'}
+  if(opts.glow){x.shadowColor=opts.glow;x.shadowBlur=24}
+  x.fillStyle=opts.color||'#fff';x.fillText(str,W/2,y);x.restore();
+}
+
+function palm(px,base,s,lean,t,col){
+  x.save();x.translate(px,base);x.scale(s,s);x.fillStyle=col;x.strokeStyle=col;
+  const sway=Math.sin(t*1.3+px)*.04;
+  // trunk
+  x.lineWidth=14;x.lineCap='round';x.beginPath();x.moveTo(0,0);
+  const tx=lean*600+sway*200,ty=-320;
+  x.quadraticCurveTo(lean*200,-180,tx,ty);x.stroke();
+  // fronds
+  for(let i=0;i<7;i++){
+    const a=-Math.PI/2+(i-3)*.48+sway*3;
+    x.save();x.translate(tx,ty);x.rotate(a);
+    x.beginPath();x.moveTo(0,0);x.quadraticCurveTo(70,-30,150,40);x.quadraticCurveTo(70,0,0,8);x.fill();
+    x.restore();
+  }
+  x.restore();
+}
+
+// ---------- scenes ----------
+function sunset(t){ // 0-7
+  const k=t/7;
+  const g=x.createLinearGradient(0,0,0,H*.62);
+  g.addColorStop(0,'#2b0b4a');g.addColorStop(.45,'#c2266e');g.addColorStop(.8,'#ff7a3d');g.addColorStop(1,'#ffc15a');
+  x.fillStyle=g;x.fillRect(0,0,W,H*.62);
+  // sun
+  const sy=H*.42+k*90,sr=150;
+  x.save();x.beginPath();x.arc(W/2,sy,sr,0,Math.PI*2);x.clip();
+  const sg=x.createLinearGradient(0,sy-sr,0,sy+sr);sg.addColorStop(0,'#fff2a8');sg.addColorStop(1,'#ff4f7b');
+  x.fillStyle=sg;x.fillRect(W/2-sr,sy-sr,sr*2,sr*2);
+  x.fillStyle='#c2266e';
+  for(let i=0;i<7;i++){const yy=sy+10+i*20,hh=2+i*1.6;x.fillRect(W/2-sr,yy,sr*2,hh)}
+  x.restore();
+  // sea
+  const sea=x.createLinearGradient(0,H*.62,0,H);sea.addColorStop(0,'#5a1a5e');sea.addColorStop(1,'#10061c');
+  x.fillStyle=sea;x.fillRect(0,H*.62,W,H*.38);
+  for(let i=0;i<26;i++){
+    const yy=H*.63+i*i*.45,w=(170-i*4)*(1+Math.sin(t*2+i)*.15);
+    x.globalAlpha=.55-i*.018;x.fillStyle='#ffb36b';x.fillRect(W/2-w/2+Math.sin(t*1.5+i*1.7)*12,yy,w,2);
+  }
+  x.globalAlpha=1;
+  palms.forEach(([px,s,l])=>palm(px+k*-30,H*.66+10,s,l,t,'#12051d'));
+  // beach
+  x.fillStyle='#12051d';x.beginPath();x.moveTo(0,H);x.lineTo(0,H*.78);x.quadraticCurveTo(W*.3,H*.72,W*.5,H*.86);x.quadraticCurveTo(W*.8,H,W,H*.8);x.lineTo(W,H);x.fill();
+  text('Le soleil se couche sur la côte…',H*.18,46,fade(t,.8,6.6),{glow:'#ff3d8b',track:2});
+}
+
+function skyline(t){ // 7-13
+  const lt=t-7;
+  x.fillStyle='#05030d';x.fillRect(0,0,W,H);
+  const g=x.createLinearGradient(0,0,0,H);g.addColorStop(0,'#0a0620');g.addColorStop(.7,'#2a0b3d');g.addColorStop(1,'#4b0f45');
+  x.fillStyle=g;x.fillRect(0,0,W,H);
+  stars.forEach(([sx,sy,r,p])=>{x.globalAlpha=.4+.6*Math.abs(Math.sin(t*1.5+p));x.fillStyle='#fff';x.fillRect(sx,sy,r,r)});
+  x.globalAlpha=1;
+  // moon
+  x.fillStyle='#ffe9f3';x.shadowColor='#ff9ad0';x.shadowBlur=40;x.beginPath();x.arc(1030,140,46,0,7);x.fill();x.shadowBlur=0;
+  const pan=lt*-14;
+  buildings.forEach(b=>{
+    const bx=b.x+pan,by=H*.86-b.h;
+    x.fillStyle='#0d0718';x.fillRect(bx,by,b.w,b.h);
+    if(b.tower){x.fillRect(bx+b.w/2-2,by-60,4,60);x.fillStyle=(Math.floor(t*2)%2)?'#ff3d8b':'#40122a';x.fillRect(bx+b.w/2-4,by-64,8,6)}
+    const r2=rng(Math.floor(b.seed));
+    for(let wy=by+12;wy<H*.86-10;wy+=18)for(let wx=bx+8;wx<bx+b.w-10;wx+=14){
+      const v=r2();const on=v>.55&&(v*7+Math.floor(lt*1.5))%3>.6;
+      if(on){x.fillStyle=v>.85?'#3de0ff':v>.7?'#ff8fc0':'#ffd27a';x.globalAlpha=.85;x.fillRect(wx,wy,6,9)}
+    }
+    x.globalAlpha=1;
+  });
+  // neon strip & water reflection
+  x.fillStyle='#ff3d8b';x.shadowColor='#ff3d8b';x.shadowBlur=20;x.fillRect(0,H*.86,W,3);x.shadowBlur=0;
+  x.save();x.globalAlpha=.25;x.translate(0,H*1.72);x.scale(1,-1);x.drawImage(cv,0,H*.55,W,H*.31,0,H*.55,W,H*.31);x.restore();
+  x.fillStyle='rgba(5,3,13,.45)';x.fillRect(0,H*.865,W,H);
+  text('…et la ville se réveille.',H*.2,54,fade(t,7.5,12.6),{glow:'#3de0ff',track:3});
+}
+
+function highway(t){ // 13-20
+  const lt=t-13;
+  const g=x.createLinearGradient(0,0,0,H*.5);g.addColorStop(0,'#14062a');g.addColorStop(1,'#ff3d8b');
+  x.fillStyle=g;x.fillRect(0,0,W,H*.5);
+  // horizon sun
+  x.fillStyle='#ffcf6b';x.globalAlpha=.9;x.beginPath();x.arc(W/2,H*.5,110,Math.PI,0);x.fill();x.globalAlpha=1;
+  // mountains
+  x.fillStyle='#24083b';x.beginPath();x.moveTo(0,H*.5);
+  for(let i=0;i<=16;i++)x.lineTo(i*W/16,H*.5-(40+((i*37)%70)));x.lineTo(W,H*.5);x.fill();
+  x.fillStyle='#0a0418';x.fillRect(0,H*.5,W,H*.5);
+  // perspective grid
+  const hz=H*.5,vx=W/2;
+  x.strokeStyle='#ff3d8b';x.lineWidth=1.5;x.shadowColor='#ff3d8b';x.shadowBlur=8;
+  for(let i=-14;i<=14;i++){x.beginPath();x.moveTo(vx,hz);x.lineTo(vx+i*160,H);x.stroke()}
+  const sp=(lt*1.6)%1;
+  for(let i=0;i<14;i++){const z=(i+1-sp)/14,yy=hz+Math.pow(z,2.4)*(H-hz);x.globalAlpha=z;x.beginPath();x.moveTo(0,yy);x.lineTo(W,yy);x.stroke()}
+  x.globalAlpha=1;x.shadowBlur=0;
+  // road
+  x.fillStyle='#120a1e';x.beginPath();x.moveTo(vx-8,hz);x.lineTo(vx+8,hz);x.lineTo(vx+330,H);x.lineTo(vx-330,H);x.fill();
+  for(let i=0;i<10;i++){const z=((i/10)+lt*1.2)%1,y1=hz+Math.pow(z,2.4)*(H-hz),y2=hz+Math.pow(Math.min(z+.04,1),2.4)*(H-hz);
+    x.fillStyle='#ffe28a';x.globalAlpha=z;x.fillRect(vx-1-z*5,y1,2+z*10,y2-y1)}
+  x.globalAlpha=1;
+  // car (original low sports coupe, rear view)
+  const bob=Math.sin(lt*9)*2,cx=vx+Math.sin(lt*.9)*60,cy=H*.8+bob;
+  x.fillStyle='rgba(255,61,139,.35)';x.beginPath();x.ellipse(cx,cy+52,170,18,0,0,7);x.fill();
+  x.fillStyle='#1a0f2a';x.beginPath();x.moveTo(cx-150,cy+40);x.lineTo(cx-140,cy-5);x.lineTo(cx-80,cy-50);x.lineTo(cx+80,cy-50);x.lineTo(cx+140,cy-5);x.lineTo(cx+150,cy+40);x.closePath();x.fill();
+  x.fillStyle='#3a2a55';x.beginPath();x.moveTo(cx-70,cy-44);x.lineTo(cx+70,cy-44);x.lineTo(cx+105,cy-8);x.lineTo(cx-105,cy-8);x.fill();
+  x.fillStyle='#ff2244';x.shadowColor='#ff2244';x.shadowBlur=30;x.fillRect(cx-135,cy+4,90,10);x.fillRect(cx+45,cy+4,90,10);x.shadowBlur=0;
+  x.fillStyle='#000';x.fillRect(cx-140,cy+40,40,14);x.fillRect(cx+100,cy+40,40,14);
+  // speed lines
+  x.strokeStyle='rgba(61,224,255,.5)';x.lineWidth=2;
+  for(let i=0;i<18;i++){const a=i/18*Math.PI*2,r0=200+((lt*600+i*97)%500);x.globalAlpha=.4;x.beginPath();x.moveTo(vx+Math.cos(a)*r0,hz+Math.sin(a)*r0*.55);x.lineTo(vx+Math.cos(a)*(r0+60),hz+Math.sin(a)*(r0+60)*.55);x.stroke()}
+  x.globalAlpha=1;
+  text('Deux complices.',H*.17,56,fade(t,13.5,19.6),{glow:'#ff3d8b',track:3});
+  text('Une seule chance.',H*.28,56,fade(t,15.2,19.6),{color:'#3de0ff',glow:'#3de0ff',track:3});
+}
+
+function chase(t){ // 20-25
+  const lt=t-20;
+  const siren=Math.floor(lt*6)%2;
+  x.fillStyle='#07040c';x.fillRect(0,0,W,H);
+  const g=x.createRadialGradient(siren?W*.2:W*.8,H*.3,0,siren?W*.2:W*.8,H*.3,W*.7);
+  g.addColorStop(0,siren?'rgba(255,40,70,.75)':'rgba(40,110,255,.75)');g.addColorStop(1,'rgba(0,0,0,0)');
+  x.fillStyle=g;x.fillRect(0,0,W,H);
+  // alley walls
+  x.fillStyle='#0e0816';x.beginPath();x.moveTo(0,0);x.lineTo(380,180);x.lineTo(380,560);x.lineTo(0,H);x.fill();
+  x.beginPath();x.moveTo(W,0);x.lineTo(W-380,180);x.lineTo(W-380,560);x.lineTo(W,H);x.fill();
+  // neon sign (original)
+  x.save();x.translate(220,260);x.rotate(-.05);
+  x.font='bold 44px Anton, Impact, sans-serif';x.fillStyle=(Math.floor(lt*4)%5)?'#ff3d8b':'#4a1530';x.shadowColor='#ff3d8b';x.shadowBlur=25;
+  x.fillText('MOTEL',0,0);x.restore();
+  x.save();x.translate(W-330,220);x.font='bold 32px Anton, Impact, sans-serif';x.fillStyle='#3de0ff';x.shadowColor='#3de0ff';x.shadowBlur=22;x.fillText('24/7',0,0);x.restore();
+  // wet ground reflections
+  x.fillStyle='#0a0612';x.fillRect(0,560,W,H-560);
+  x.globalAlpha=.35;x.fillStyle=siren?'#ff2846':'#2869ff';
+  for(let i=0;i<8;i++)x.fillRect(420+i*60+Math.sin(t*3+i)*6,580+i*16,40+i*8,3);
+  x.globalAlpha=1;
+  // rain
+  x.strokeStyle='rgba(200,220,255,.35)';x.lineWidth=1.2;
+  rain.forEach(([rx,ry,l,s])=>{const yy=(ry+t*900*(0.7+s*.6))%H,xx=(rx+t*-120)%W;x.beginPath();x.moveTo((xx+W)%W,yy);x.lineTo((xx+W)%W-3,yy+l);x.stroke()});
+  // flash
+  if(lt>2.4&&lt<2.55){x.fillStyle='rgba(255,255,255,.8)';x.fillRect(0,0,W,H)}
+  text('Tout peut basculer.',H*.5+20,72,fade(t,20.4,24.7),{glow:siren?'#ff2846':'#2869ff',track:4});
+}
+
+function titleCard(t){ // 25-30
+  const lt=t-25;
+  x.fillStyle='#07040c';x.fillRect(0,0,W,H);
+  const g=x.createRadialGradient(W/2,H/2,0,W/2,H/2,W*.6);g.addColorStop(0,'#3a0d3f');g.addColorStop(1,'#07040c');
+  x.fillStyle=g;x.fillRect(0,0,W,H);
+  const a=ease(lt/1.2),s=1.25-.25*ease(lt/1.5);
+  x.save();x.translate(W/2,H*.52);x.scale(s,s);x.globalAlpha=a;
+  x.font='200px Anton, Impact, sans-serif';x.textAlign='center';
+  const tg=x.createLinearGradient(0,-170,0,10);tg.addColorStop(0,'#ffd36b');tg.addColorStop(.5,'#ff3d8b');tg.addColorStop(1,'#7b2cff');
+  x.shadowColor='#ff3d8b';x.shadowBlur=40;x.fillStyle=tg;x.fillText('GTA 6',0,0);
+  x.shadowBlur=0;x.strokeStyle='rgba(255,255,255,.6)';x.lineWidth=2;x.strokeText('GTA 6',0,0);
+  x.restore();
+  // shine sweep
+  const sx=-300+lt*700;
+  x.save();x.globalCompositeOperation='lighter';const sh=x.createLinearGradient(sx,0,sx+160,0);
+  sh.addColorStop(0,'rgba(255,255,255,0)');sh.addColorStop(.5,'rgba(255,255,255,.18)');sh.addColorStop(1,'rgba(255,255,255,0)');
+  x.fillStyle=sh;x.fillRect(0,H*.3,W,H*.3);x.restore();
+  text('L\'ATTENTE TOUCHE À SA FIN',H*.68,30,fade(t,26,30.5,.8),{color:'#3de0ff',track:8});
+  text('trailer de fan · fait en code',H*.9,18,fade(t,27,30.5,.8),{font:'Inter, sans-serif',color:'#a693b3',track:4,weight:'600'});
+}
+
+function render(t){
+  x.save();x.clearRect(0,0,W,H);
+  if(t<7)sunset(t);else if(t<13)skyline(t);else if(t<20)highway(t);else if(t<25)chase(t);else titleCard(t);
+  // scene crossfade to black
+  [7,13,20,25].forEach(c=>{const d=Math.abs(t-c);if(d<.35){x.fillStyle=`rgba(0,0,0,${1-d/.35})`;x.fillRect(0,0,W,H)}});
+  if(t<.5){x.fillStyle=`rgba(0,0,0,${1-t/.5})`;x.fillRect(0,0,W,H)}
+  // letterbox + grain + vignette
+  x.fillStyle='#000';x.fillRect(0,0,W,40);x.fillRect(0,H-40,W,40);
+  const v=x.createRadialGradient(W/2,H/2,H*.4,W/2,H/2,W*.75);v.addColorStop(0,'rgba(0,0,0,0)');v.addColorStop(1,'rgba(0,0,0,.55)');
+  x.fillStyle=v;x.fillRect(0,0,W,H);
+  const gr=rng(Math.floor(t*24)+1);x.fillStyle='rgba(255,255,255,.05)';
+  for(let i=0;i<300;i++)x.fillRect(gr()*W,gr()*H,1.5,1.5);
+  x.restore();
+}
+window.__render=render;
+
+// ---------- player ----------
+const playBtn=document.getElementById('play'),fill=document.getElementById('fill'),timeEl=document.getElementById('time');
+let playing=true,cur=0,last=null;
+const reduce=matchMedia('(prefers-reduced-motion: reduce)').matches;
+const fmt=s=>`0:${String(Math.floor(s)).padStart(2,'0')}`;
+function draw(){render(cur);fill.style.width=(cur/DUR*100)+'%';timeEl.textContent=`${fmt(cur)} / 0:30`}
+function loop(ts){
+  if(last!==null&&playing){cur+=(ts-last)/1000;if(cur>=DUR){cur=DUR-.001;playing=false;playBtn.textContent='Lecture'}}
+  last=ts;draw();requestAnimationFrame(loop);
+}
+playBtn.onclick=()=>{if(cur>=DUR-.01)cur=0;playing=!playing;playBtn.textContent=playing?'Pause':'Lecture'};
+document.getElementById('restart').onclick=()=>{cur=0;playing=true;playBtn.textContent='Pause'};
+document.getElementById('track').onclick=e=>{const r=e.currentTarget.getBoundingClientRect();cur=clamp((e.clientX-r.left)/r.width,0,1)*DUR*.999};
+if(reduce){playing=false;cur=26.5;playBtn.textContent='Lecture'}
+if(!new URLSearchParams(location.search).has('capture')){document.fonts.ready.then(()=>requestAnimationFrame(loop))}
+</script>
